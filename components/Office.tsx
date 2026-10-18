@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { openConversationInputs, useEveAgent } from 'eve/react';
 import type { ClientSessionState } from 'eve/client';
+import { replyState, safeDiagnostic } from './maya-feedback.mjs';
 
 type RecordEntry = { id: string; title: string; updatedAt: string };
 const CURRENT = 'igor-office-maya-session-v1', HISTORY = 'igor-office-maya-history-v1';
@@ -59,6 +60,8 @@ function Maya({ opened, onClose, brief, onStatus }: { opened: boolean; onClose: 
   const [history, setHistory] = useState<RecordEntry[]>(readHistory);
   const [notice, setNotice] = useState('');
   const [currentError, setCurrentError] = useState('');
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [diagnostic, setDiagnostic] = useState('');
   const titleRef = useRef('Conversa com Maya');
   const bottom = useRef<HTMLDivElement>(null);
   const pane = useRef<HTMLElement>(null);
@@ -80,11 +83,13 @@ function Maya({ opened, onClose, brief, onStatus }: { opened: boolean; onClose: 
     },
     onError(error) { setCurrentError(errorLabel(error)); },
   });
-  const busy = agent.status === 'submitted' || agent.status === 'streaming';
-  const resuming = agent.status === 'resuming';
+  const outcome = replyState(agent.data, agent.status);
+  const effectiveStatus = outcome === 'failed' ? 'error' : outcome === 'working' && agent.status === 'ready' ? 'streaming' : agent.status;
+  const busy = effectiveStatus === 'submitted' || effectiveStatus === 'streaming';
+  const resuming = agent.status === 'resuming' || syncBusy;
   const inputs = openConversationInputs(agent.data).map(input => input.request);
   useEffect(() => { if (brief) setDraft(brief); }, [brief]);
-  useEffect(() => { onStatus(agent.status); }, [agent.status, onStatus]);
+  useEffect(() => { onStatus(effectiveStatus); }, [effectiveStatus, onStatus]);
   useEffect(() => { if (opened) bottom.current?.scrollIntoView({ block: 'end' }); }, [agent.data.messages, opened]);
   useEffect(() => {
     if (!opened) return;
@@ -106,10 +111,41 @@ function Maya({ opened, onClose, brief, onStatus }: { opened: boolean; onClose: 
     titleRef.current = text.slice(0, 75); setCurrentError(''); setNotice(''); setDraft('');
     try { await agent.send(text); } catch (e) { setCurrentError(errorLabel(e)); setDraft(text); }
   }
+  async function recover() {
+    if (syncBusy || agent.status === 'resuming' || agent.status === 'submitted' || agent.status === 'streaming') return;
+    setSyncBusy(true); setCurrentError(''); setNotice('');
+    try { await agent.resume(); }
+    catch (e) { setCurrentError(errorLabel(e)); }
+    finally { setSyncBusy(false); }
+  }
+  async function copyDiagnostic() {
+    const report = JSON.stringify(safeDiagnostic(agent.data, agent.events, agent.status), null, 2);
+    setDiagnostic(report);
+    try { await navigator.clipboard.writeText(report); setNotice('Diagnóstico copiado. Ele contém apenas estados e tipos de eventos, sem mensagens, senha ou conteúdo interno da IA.'); }
+    catch { setNotice('Não foi possível copiar automaticamente. Abra o diagnóstico abaixo e copie o texto.'); }
+  }
   function download() {
     const text = agent.data.messages.map(m => `${m.role === 'user' ? 'IGOR' : 'MAYA'}\n${m.parts.filter(p => p.type === 'text').map(p => p.type === 'text' ? p.text : '').join('\n')}`).filter(Boolean).join('\n\n---\n\n');
     const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = 'maya-conversa.txt'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
-  const stateLabel = { ready: 'Pronta para receber um tema', submitted: 'Solicitação enviada', streaming: 'Trabalhando na sua solicitação', resuming: 'Recuperando a conversa', error: 'Execução interrompida' }[agent.status];
-  return <div className={`maya-overlay ${opened ? '' : 'closed'}`}><button className="backdrop" aria-label="Voltar ao escritório" onClick={onClose} tabIndex={-1}/><section ref={pane} role="dialog" aria-modal="true" aria-labelledby="maya-title" className="maya-pane"><header className="maya-header"><div className="maya-avatar">M</div><div><h2 id="maya-title">Maya <span>CONTEÚDO</span></h2><p aria-live="polite">{stateLabel}</p></div><button className="icon-button" aria-label="Fechar painel" onClick={onClose}>×</button></header><div className="chat-tools"><button disabled={busy || resuming} onClick={() => { agent.reset(); setDraft(''); setCurrentError(''); setNotice(''); }}>＋ Nova conversa</button><button disabled={!agent.data.messages.length} onClick={download}>Exportar</button><button disabled={!agent.session} onClick={() => { void navigator.clipboard.writeText(location.href).then(() => setNotice('Link copiado. Ele exige o código de acesso do escritório.'), () => setNotice('Copie a URL da barra do navegador.')); }}>Copiar link</button></div><div className="history"><label htmlFor="history">Retomar conversa</label><select id="history" value={agent.session?.sessionId || ''} disabled={busy || resuming} onChange={e => { if (e.target.value) location.href = '/?session=' + encodeURIComponent(e.target.value); }}><option value="">Selecione uma conversa</option>{history.map(h => <option key={h.id} value={h.id}>{h.title}</option>)}</select><small>Atalhos neste navegador. Conversas recuperadas do servidor pelo link.</small></div><div className="messages">{!agent.data.messages.length && <div className="chat-empty"><span>✦</span><h3>Da ideia ao conteúdo.</h3><p>Me diga o tema e o público. Eu preparo um roteiro com gancho, cenas, falas e CTA.</p><button onClick={() => setDraft('Crie um Reels de 45 segundos para empresários mostrando como um agente de IA pode organizar leads que chegam pelo WhatsApp. Use um exemplo hipotético e um CTA para minha DM.')}>Começar com IA no WhatsApp ↗</button><small>Esta versão não pesquisa notícias nem publica nas redes.</small></div>}{agent.data.messages.map(message => <article className={`message ${message.role}`} key={message.id}><b>{message.role === 'user' ? 'Você' : 'Maya'}</b>{message.parts.map((part, i) => part.type === 'text' ? <div className="message-text" key={part.id || i}>{part.text}</div> : null)}</article>)}{busy && <div className="working" role="status"><i/> Aguardando os próximos eventos da Maya…</div>}{(currentError || agent.error) && <p className="error" role="alert">{currentError || errorLabel(agent.error)}</p>}{notice && <p className="notice" role="status">{notice}</p>}{inputs.map(input => <div className="approval" key={input.requestId}><p>{input.prompt}</p>{input.options?.map(option => <button disabled={resuming} key={option.id} onClick={() => { void agent.respond([{ requestId: input.requestId, optionId: option.id }]).catch(e => setCurrentError(errorLabel(e))); }}>{option.label}</button>)}</div>)}<div ref={bottom}/></div><form className="composer" onSubmit={send}><label htmlFor="brief">Seu próximo conteúdo</label><textarea id="brief" value={draft} onChange={e => setDraft(e.target.value)} placeholder="Ex.: Um Reels para donos de lojas que perdem leads no WhatsApp…" maxLength={8000} rows={3} disabled={resuming}/><div><span>{draft.length}/8000</span>{busy ? <button type="button" className="cancel" onClick={() => { void agent.cancel().catch(e => setCurrentError(errorLabel(e))); }}>Cancelar execução</button> : <button className="primary" disabled={!draft.trim() || resuming}>Enviar para Maya ↗</button>}</div><small>Fechar o painel não cancela a execução. Revise o conteúdo antes de publicar.</small></form></section></div>;
+  const stateLabel = syncBusy ? 'Recuperando a conversa' : outcome === 'empty' ? 'Sem resposta de texto' : outcome === 'cancelled' ? 'Execução cancelada' : outcome === 'pending' ? 'Aguardando uma ação sua' : { ready: 'Pronta para receber um tema', submitted: 'Solicitação enviada', streaming: 'Trabalhando na sua solicitação', resuming: 'Recuperando a conversa', error: 'Execução interrompida' }[effectiveStatus];
+  return <div className={`maya-overlay ${opened ? '' : 'closed'}`}><button className="backdrop" aria-label="Voltar ao escritório" onClick={onClose} tabIndex={-1}/><section ref={pane} role="dialog" aria-modal="true" aria-labelledby="maya-title" className="maya-pane"><header className="maya-header"><div className="maya-avatar">M</div><div><h2 id="maya-title">Maya <span>CONTEÚDO</span></h2><p aria-live="polite">{stateLabel}</p></div><button className="icon-button" aria-label="Fechar painel" onClick={onClose}>×</button></header><div className="chat-tools"><button disabled={busy || resuming} onClick={() => { agent.reset(); setDraft(''); setCurrentError(''); setNotice(''); setDiagnostic(''); }}>＋ Nova conversa</button><button disabled={!agent.data.messages.length} onClick={download}>Exportar</button><button disabled={!agent.session} onClick={() => { void navigator.clipboard.writeText(location.href).then(() => setNotice('Link copiado. Ele exige o código de acesso do escritório.'), () => setNotice('Copie a URL da barra do navegador.')); }}>Copiar link</button><button disabled={!agent.session} onClick={() => void copyDiagnostic()}>Copiar diagnóstico</button></div><div className="history"><label htmlFor="history">Retomar conversa</label><select id="history" value={agent.session?.sessionId || ''} disabled={busy || resuming} onChange={e => { if (e.target.value) location.href = '/?session=' + encodeURIComponent(e.target.value); }}><option value="">Selecione uma conversa</option>{history.map(h => <option key={h.id} value={h.id}>{h.title}</option>)}</select><small>Atalhos neste navegador. Conversas recuperadas do servidor pelo link.</small></div><div className="messages">{!agent.data.messages.length && <div className="chat-empty"><span>✦</span><h3>Da ideia ao conteúdo.</h3><p>Me diga o tema e o público. Eu preparo um roteiro com gancho, cenas, falas e CTA.</p><button onClick={() => setDraft('Crie um Reels de 45 segundos para empresários mostrando como um agente de IA pode organizar leads que chegam pelo WhatsApp. Use um exemplo hipotético e um CTA para minha DM.')}>Começar com IA no WhatsApp ↗</button><small>Esta versão não pesquisa notícias nem publica nas redes.</small></div>}{agent.data.messages.map(message => <article className={`message ${message.role}`} key={message.id}>
+  <b>{message.role === 'user' ? 'Você' : 'Maya'}</b>
+  {message.parts.map((part, i) => {
+    if (part.type === 'text') return <div className="message-text" key={part.id || i}>{part.text}</div>;
+    if (part.type === 'dynamic-tool') return <div className={part.state === 'output-error' ? 'error' : 'notice'} key={part.toolCallId}>
+      <span>{part.toolMetadata?.eve?.label || 'Consultando informações para sua resposta'}</span>
+      <small style={{ display: 'block' }}>{part.state === 'output-error' ? 'Esta etapa falhou. Copie o diagnóstico para investigar.' : part.state === 'output-available' ? 'Informações recebidas.' : part.state === 'output-denied' ? 'Etapa não autorizada.' : part.state === 'approval-requested' || part.state === 'approval-responded' ? 'Aguardando autorização.' : 'Processando esta etapa…'}</small>
+    </div>;
+    if (part.type === 'authorization') return <p className="notice" key={part.attemptId || i}>{part.state === 'required' ? 'Há uma autorização pendente para continuar esta execução.' : 'A etapa de autorização foi encerrada.'}</p>;
+    return null;
+  })}
+  {message.role === 'assistant' && !message.parts.some(part => (part.type === 'text' && part.text.trim()) || part.type === 'dynamic-tool' || part.type === 'authorization') && <p className="notice">{message.metadata?.turnId && agent.data.turns[message.metadata.turnId]?.status === 'active' ? 'A Maya está preparando a resposta…' : 'Nenhuma resposta de texto foi recebida nesta execução.'}</p>}
+</article>)}{busy && <div className="working" role="status"><i/> Aguardando os próximos eventos da Maya…</div>}{(currentError || agent.error) && <p className="error" role="alert">{currentError || errorLabel(agent.error)}</p>}
+{(outcome === 'empty' || outcome === 'failed') && <div className="notice" role="status">
+  <p>{outcome === 'failed' ? 'A execução falhou antes de entregar uma resposta completa.' : 'Sua mensagem está registrada, mas ainda não recebemos uma resposta de texto. Isso não confirma uma entrega da IA.'}</p>
+  <button type="button" disabled={resuming} onClick={() => void recover()}>{resuming ? 'Consultando…' : 'Recuperar resposta'}</button>
+  <p><small>Esse botão consulta a conversa existente sem enviar outra tarefa à IA. Se continuar sem resposta, use “Copiar diagnóstico”.</small></p>
+</div>}
+{diagnostic && <details className="notice"><summary>Ver diagnóstico sem conteúdo da conversa</summary><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12 }}>{diagnostic}</pre></details>}{notice && <p className="notice" role="status">{notice}</p>}{inputs.map(input => <div className="approval" key={input.requestId}><p>{input.prompt}</p>{input.options?.map(option => <button disabled={resuming} key={option.id} onClick={() => { void agent.respond([{ requestId: input.requestId, optionId: option.id }]).catch(e => setCurrentError(errorLabel(e))); }}>{option.label}</button>)}</div>)}<div ref={bottom}/></div><form className="composer" onSubmit={send}><label htmlFor="brief">Seu próximo conteúdo</label><textarea id="brief" value={draft} onChange={e => setDraft(e.target.value)} placeholder="Ex.: Um Reels para donos de lojas que perdem leads no WhatsApp…" maxLength={8000} rows={3} disabled={resuming}/><div><span>{draft.length}/8000</span>{busy ? <button type="button" className="cancel" onClick={() => { void agent.cancel().catch(e => setCurrentError(errorLabel(e))); }}>Cancelar execução</button> : <button className="primary" disabled={!draft.trim() || resuming}>Enviar para Maya ↗</button>}</div><small>Fechar o painel não cancela a execução. Revise o conteúdo antes de publicar.</small></form></section></div>;
 }
