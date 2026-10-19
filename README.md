@@ -33,7 +33,7 @@ Quando o acesso estiver disponível:
 5. Habilite o acesso do projeto ao AI Gateway/OIDC e confira sua disponibilidade/saldo. Nenhuma chave do provedor é colocada no navegador. Não há custo zero garantido.
 6. Publique e faça o teste completo abaixo. Não afirme que a IA está ativa apenas porque o deploy compilou.
 
-O modelo inicial foi preservado do scaffold: `openai/gpt-6-luna-fast`. Limites de sessão do eve são limites de uso com pausa, não um teto rígido de cobrança; a chamada que ultrapassa o orçamento pode terminar, e custos de infraestrutura são separados.
+O modelo atual é `openai/gpt-5-mini`, disponível no plano gratuito do AI Gateway. Modelos mais novos (como `openai/gpt-6-luna-fast`) exigem créditos pagos. Limites de sessão do eve são limites de uso com pausa, não um teto rígido de cobrança; a chamada que ultrapassa o orçamento pode terminar, e custos de infraestrutura são separados.
 
 ## Teste de aceitação após publicação
 
