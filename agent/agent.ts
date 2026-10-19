@@ -1,7 +1,8 @@
 import { defineAgent } from "eve";
 
 export default defineAgent({
-  model: "openai/gpt-6-luna-fast",
+  // gpt-5-mini: available on the AI Gateway free tier. Switch to a newer model after topping up credits.
+  model: "openai/gpt-5-mini",
   reasoning: "high",
   defaultTools: false,
   tool: false,
