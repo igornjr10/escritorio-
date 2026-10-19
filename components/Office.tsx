@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { openConversationInputs, useEveAgent } from 'eve/react';
 import type { ClientSessionState } from 'eve/client';
-import { replyState, safeDiagnostic } from './maya-feedback.mjs';
+import { replyState, safeDiagnostic, latestFailure } from './maya-feedback.mjs';
 
 type RecordEntry = { id: string; title: string; updatedAt: string };
 const CURRENT = 'igor-office-maya-session-v1', HISTORY = 'igor-office-maya-history-v1';
@@ -84,6 +84,7 @@ function Maya({ opened, onClose, brief, onStatus }: { opened: boolean; onClose: 
     onError(error) { setCurrentError(errorLabel(error)); },
   });
   const outcome = replyState(agent.data, agent.status);
+  const failure = latestFailure(agent.events);
   const effectiveStatus = outcome === 'failed' ? 'error' : outcome === 'working' && agent.status === 'ready' ? 'streaming' : agent.status;
   const busy = effectiveStatus === 'submitted' || effectiveStatus === 'streaming';
   const resuming = agent.status === 'resuming' || syncBusy;
@@ -121,7 +122,7 @@ function Maya({ opened, onClose, brief, onStatus }: { opened: boolean; onClose: 
   async function copyDiagnostic() {
     const report = JSON.stringify(safeDiagnostic(agent.data, agent.events, agent.status), null, 2);
     setDiagnostic(report);
-    try { await navigator.clipboard.writeText(report); setNotice('Diagnóstico copiado. Ele contém apenas estados e tipos de eventos, sem mensagens, senha ou conteúdo interno da IA.'); }
+    try { await navigator.clipboard.writeText(report); setNotice('Diagnóstico copiado. Ele contém estados, códigos e categorias de falha, sem mensagens, senha ou conteúdo interno da IA.'); }
     catch { setNotice('Não foi possível copiar automaticamente. Abra o diagnóstico abaixo e copie o texto.'); }
   }
   function download() {
@@ -142,6 +143,7 @@ function Maya({ opened, onClose, brief, onStatus }: { opened: boolean; onClose: 
   })}
   {message.role === 'assistant' && !message.parts.some(part => (part.type === 'text' && part.text.trim()) || part.type === 'dynamic-tool' || part.type === 'authorization') && <p className="notice">{message.metadata?.turnId && agent.data.turns[message.metadata.turnId]?.status === 'active' ? 'A Maya está preparando a resposta…' : 'Nenhuma resposta de texto foi recebida nesta execução.'}</p>}
 </article>)}{busy && <div className="working" role="status"><i/> Aguardando os próximos eventos da Maya…</div>}{(currentError || agent.error) && <p className="error" role="alert">{currentError || errorLabel(agent.error)}</p>}
+{failure && <div className="error" role="status"><strong>Última falha registrada</strong><p>{failure.hint}</p><small>Código: {failure.code}{failure.httpStatus ? ` · HTTP ${failure.httpStatus}` : ''}</small><p><button type="button" onClick={() => void copyDiagnostic()}>Copiar diagnóstico da falha</button></p></div>}
 {(outcome === 'empty' || outcome === 'failed') && <div className="notice" role="status">
   <p>{outcome === 'failed' ? 'A execução falhou antes de entregar uma resposta completa.' : 'Sua mensagem está registrada, mas ainda não recebemos uma resposta de texto. Isso não confirma uma entrega da IA.'}</p>
   <button type="button" disabled={resuming} onClick={() => void recover()}>{resuming ? 'Consultando…' : 'Recuperar resposta'}</button>
