@@ -1,6 +1,7 @@
 'use strict';
 // Ambient office life: agents type at their desks, walk the aisles to meet in pairs and chat.
-// Purely illustrative — no agent work happens here. Maya follows her real session state.
+// Ambient moves are illustrative. Real work overrides them: when Atlas delegates (real task events),
+// he walks to that specialist's desk, and the specialist works until the delivery comes back.
 (() => {
   const svg = document.getElementById('office');
   const NS = 'http://www.w3.org/2000/svg';
@@ -38,15 +39,21 @@
     'pulse-nexus': ['Revisão da semana?', 'Quinta de manhã 📅', 'Levo a estrutura', 'Perfeito'],
   };
   const deskIcons = { atlas: ['📋', '🗓️', '💭'], hunter: ['🔎', '📇', '💭'], maya: ['💡', '✍️', '💭'], pulse: ['📊', '📈', '💭'], nexus: ['🗂️', '✅', '💭'] };
-  const mayaBubbles = { submitted: '📨 Recebi!', streaming: '✍️ Escrevendo…', resuming: '↺ Recuperando…', error: '⚠️ Algo falhou' };
+  const atlasBubbles = { submitted: '📨 Recebi!', streaming: '🧠 Organizando…', resuming: '↺ Recuperando…', error: '⚠️ Algo falhou' };
+  const names = Object.fromEntries(agents.map(a => [a.id, a.name]));
+  const visitSpot = id => ({ x: homes[id].x + 45, y: homes[id].y + 5 });
 
   const st = Object.fromEntries(agents.map(a => [a.id, { pos: { ...homes[a.id] }, path: [], mode: 'desk', bubble: '', bubbleUntil: 0, nextIdle: 0 }]));
   let meetings = [], nextPlan = performance.now() + 2500, last = performance.now(), layer = null, order = '';
   const bubbleNodes = {};
 
-  const mayaState = () => (typeof mayaRealState === 'string' ? mayaRealState : 'ready');
-  const mayaBusy = () => ['submitted', 'streaming', 'resuming'].includes(mayaState());
-  const isFree = id => st[id].mode === 'desk' && !(id === 'maya' && mayaBusy());
+  const sessionState = () => (typeof mayaRealState === 'string' ? mayaRealState : 'ready');
+  const sessionBusy = () => ['submitted', 'streaming', 'resuming'].includes(sessionState());
+  const realActive = () => (typeof teamActive !== 'undefined' && Array.isArray(teamActive) ? teamActive : []);
+  const isBusyForReal = id => (id === 'atlas' ? sessionBusy() || visitQueue.length > 0 || atlasAt !== null : realActive().includes(id));
+  const isFree = id => st[id].mode === 'desk' && !isBusyForReal(id);
+  let visitQueue = [], atlasAt = null, seenActive = [];
+  const justDone = {};
   const pick = list => list[Math.floor(Math.random() * list.length)];
   const say = (id, text, ms, now) => { st[id].bubble = text; st[id].bubbleUntil = now + ms; };
   const goTo = (id, spot, seat) => { st[id].path = [...exits[id], HUB, ...spot.via, seat]; st[id].mode = 'walking'; };
@@ -80,6 +87,12 @@
     ids.forEach((id, i) => goTo(id, spot, spot.seats[i]));
   }
 
+  function startVisit(id, now) {
+    const a = st.atlas, from = atlasAt === null ? exits.atlas : exits[atlasAt];
+    a.path = [...from, HUB, ...[...exits[id]].reverse(), visitSpot(id)];
+    a.mode = 'visiting'; atlasAt = id;
+  }
+
   function walk(s, dt) {
     let budget = SPEED * dt;
     while (budget > 0 && s.path.length) {
@@ -90,19 +103,38 @@
   }
 
   function update(now, dt) {
+    // --- Real delegation (from task events) ---
+    const active = realActive();
+    for (const id of active) if (!seenActive.includes(id) && !visitQueue.includes(id)) visitQueue.push(id);
+    for (const id of seenActive) if (!active.includes(id)) justDone[id] = now;
+    seenActive = [...active];
+    for (const m of meetings) if (!m.ending && m.ids.some(isBusyForReal)) { m.ending = now; m.ids.forEach(goHome); }
+    const atlas = st.atlas;
+    if (atlas.mode === 'desk' && visitQueue.length) startVisit(visitQueue.shift(), now);
+    if (atlas.mode === 'visiting' && walk(atlas, dt)) { atlas.mode = 'briefing'; atlas.briefUntil = now + 2600; say('atlas', '📨 ' + names[atlasAt] + ', contigo!', 1300, now); atlas.replyAt = now + 1300; }
+    if (atlas.mode === 'briefing') {
+      if (atlas.replyAt && now > atlas.replyAt) { say(atlasAt, '👍 Deixa comigo', 1300, now); atlas.replyAt = 0; }
+      if (now > atlas.briefUntil) {
+        if (visitQueue.length) startVisit(visitQueue.shift(), now);
+        else { atlas.path = [...exits[atlasAt], HUB, ...[...exits.atlas].reverse(), homes.atlas]; atlas.mode = 'atlas-return'; }
+      }
+    }
+    if (atlas.mode === 'atlas-return' && walk(atlas, dt)) { atlas.mode = 'desk'; atlasAt = null; atlas.nextIdle = now + 4000; }
+    for (const id of active) if (st[id].mode === 'desk' && !(atlasAt === id && atlas.mode === 'briefing')) say(id, '✍️ Trabalhando…', 400, now);
+    for (const id in justDone) { if (now - justDone[id] < 2600 && st[id].mode === 'desk') say(id, '✅ Entregue!', 400, now); else if (now - justDone[id] >= 2600) delete justDone[id]; }
+    if (atlasBubbles[sessionState()] && atlas.mode === 'desk' && !visitQueue.length) say('atlas', atlasBubbles[sessionState()], 400, now);
     if (now > nextPlan) { plan(now); nextPlan = now + (running ? 3500 : 7000) + Math.random() * 4000; }
     for (const a of agents) {
       const s = st[a.id];
       if (s.mode === 'walking' && walk(s, dt)) s.mode = 'waiting';
       if (s.mode === 'returning' && walk(s, dt)) { s.mode = 'desk'; s.nextIdle = now + 2000 + Math.random() * 6000; }
-      if (s.mode === 'desk' && now > s.nextIdle && !(a.id === 'maya' && mayaState() !== 'ready')) {
+      if (s.mode === 'desk' && now > s.nextIdle && !isBusyForReal(a.id) && !justDone[a.id]) {
         if (now > s.nextIdle + 50) say(a.id, pick(deskIcons[a.id]), 2200, now);
         s.nextIdle = now + 9000 + Math.random() * 12000;
       }
     }
     for (const m of [...meetings]) {
-      if (m.ids.includes('maya') && mayaBusy() && !m.ending) { m.ending = now; m.ids.forEach(goHome); }
-      if (m.ending) { if (m.ids.every(id => st[id].mode === 'desk')) meetings = meetings.filter(x => x !== m); continue; }
+      if (m.ending) { if (m.ids.every(id => st[id].mode !== 'returning')) meetings = meetings.filter(x => x !== m); continue; }
       if (!m.ids.every(id => st[id].mode === 'waiting' || st[id].mode === 'talking')) continue;
       if (now < m.nextLine) continue;
       if (m.idx < m.lines.length) {
@@ -112,9 +144,6 @@
         m.idx++; m.nextLine = now + 2500;
       } else { m.ending = now; m.ids.forEach(goHome); }
     }
-    // Maya's real state overrides her ambient bubble.
-    const ms = mayaState();
-    if (mayaBubbles[ms]) say('maya', mayaBubbles[ms], 400, now);
   }
 
   function ensureLayer() {
@@ -150,10 +179,10 @@
       if (!g) continue;
       const [x, y] = project(s.pos.x, s.pos.y);
       g.setAttribute('transform', `translate(${x.toFixed(1)},${y.toFixed(1)})`);
-      const moving = s.mode === 'walking' || s.mode === 'returning';
+      const moving = s.mode === 'walking' || s.mode === 'returning' || s.mode === 'visiting' || s.mode === 'atlas-return';
       g.classList.toggle('walking', moving);
-      g.classList.toggle('typing', s.mode === 'desk' && (a.id !== 'maya' || mayaState() !== 'error'));
-      g.classList.toggle('talking', s.mode === 'talking' && now < s.bubbleUntil);
+      g.classList.toggle('typing', s.mode === 'desk' && !(a.id === 'atlas' && sessionState() === 'error'));
+      g.classList.toggle('talking', (s.mode === 'talking' || s.mode === 'briefing') && now < s.bubbleUntil);
       if (now < s.bubbleUntil && s.bubble) drawBubble(a.id, s.bubble, x, y);
       else if (bubbleNodes[a.id]) { bubbleNodes[a.id].remove(); delete bubbleNodes[a.id]; }
     }
