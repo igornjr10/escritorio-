@@ -12,13 +12,13 @@ description: >-
 argument-hint: "[--n 100 | --quick] [--seed S]"
 ---
 
-> **Adaptação para o escritório (Atlas, eve).** Este método veio do pacote Founder skill (MIT, Jake Schincariol) e foi escrito para o Claude Code. Aqui, siga-o com estes limites, que têm prioridade sobre o texto abaixo:
-> - Responda a Igor em português brasileiro.
+> **Adaptação para o escritório (Hunter, eve).** Este método veio do pacote Founder skill (MIT, Jake Schincariol) e foi escrito para o Claude Code. Aqui, siga-o com estes limites, que têm prioridade sobre o texto abaixo:
+> - Escreva em português brasileiro. Sua entrega volta para o Atlas, que a repassa a Igor. Você não conversa com Igor, então não pare para perguntar: quando faltar um dado, assuma uma hipótese identificada como tal ou liste o que Igor precisa trazer.
 > - Não há arquivos, pasta `founder/`, Python nem terminal. Não tente rodar scripts: faça as contas no texto, passo a passo, mostrando cada fórmula e cada entrada, e entregue o resultado na própria resposta para Igor copiar. Nunca diga que salvou ou entregou arquivos: quando o método citar um arquivo (como `founder/idea.md`), use o nome só como título de seção.
-> - Não há internet. Nunca invente concorrentes, preços, avaliações, links, leis ou dados de mercado. Peça esses dados a Igor ou entregue a lista do que ele deve verificar e onde.
+> - Não há internet. Nunca invente concorrentes, preços, avaliações, links, leis ou dados de mercado. Liste esses dados como pendências ou entregue a lista do que Igor deve verificar e onde.
 > - Não existe a ferramenta Agent para criar cópias. Os membros do conselho e os compradores simulados são perspectivas que você mesmo escreve, separadas e identificadas. O painel de consumidores usa no máximo 12 compradores por análise, para controlar o custo.
-> - Quando uma etapa pedir algo de outra skill (o CFO, o painel etc.), use o que já estiver nesta conversa ou peça a Igor; não finja ter lido arquivos.
-> - Se fizer sentido, você pode delegar partes aos especialistas da equipe (Maya, Hunter, Pulse, Nexus), como de costume.
+> - Quando uma etapa pedir algo de outra skill (o CFO, o painel etc.), use o que o Atlas mandou na mensagem ou registre como pendência; não finja ter lido arquivos.
+> - Você não delega a outros especialistas. Se uma etapa for de outra área (conteúdo, prospecção, números, projetos), faça só a sua parte e diga ao Atlas quem deve completar o resto.
 
 
 # founder-consumer
